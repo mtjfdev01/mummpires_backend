@@ -1,12 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
 import {
   BadRequestException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
+import { Repository } from 'typeorm';
 import { MailService } from '../mail/mail.service';
+import { ReservationEntity } from './reservation.entity';
 import type {
   Reservation,
   ReservationInput,
@@ -15,39 +16,68 @@ import type {
 
 @Injectable()
 export class ReservationsService {
-  private readonly filePath = join(process.cwd(), 'data', 'reservations.json');
+  constructor(
+    @InjectRepository(ReservationEntity)
+    private readonly repo: Repository<ReservationEntity>,
+    private readonly mail: MailService,
+  ) {}
 
-  constructor(private readonly mail: MailService) {
-    this.ensureStore();
-  }
-
-  list() {
-    return this.read().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  async list() {
+    const rows = await this.repo.find({
+      order: { createdAt: 'DESC' },
+    });
+    return rows.map((row) => this.toReservation(row));
   }
 
   async create(input: ReservationInput, source: 'public' | 'admin') {
     const reservation = this.normalize(input, source);
-    const all = this.read();
-    all.push(reservation);
-    this.write(all);
-    await this.mail.notifyReservation(reservation);
-    return reservation;
+    const saved = await this.repo.save(
+      this.repo.create({
+        ...reservation,
+        createdAt: new Date(reservation.createdAt),
+      }),
+    );
+    const stored = this.toReservation(saved);
+    await this.mail.notifyReservation(stored);
+    return stored;
   }
 
-  updateStatus(id: string, status: ReservationStatus) {
+  async updateStatus(id: string, status: ReservationStatus) {
     const allowed: ReservationStatus[] = ['pending', 'approved', 'declined'];
     if (!allowed.includes(status)) {
       throw new BadRequestException('Invalid status');
     }
-    const all = this.read();
-    const index = all.findIndex((item) => item.id === id);
-    if (index < 0) throw new NotFoundException('Reservation not found');
-    all[index] = { ...all[index], status };
-    this.write(all);
-    return all[index];
+    const row = await this.repo.findOne({ where: { id } });
+    if (!row) throw new NotFoundException('Reservation not found');
+    row.status = status;
+    return this.toReservation(await this.repo.save(row));
   }
 
-  private normalize(input: ReservationInput, source: 'public' | 'admin'): Reservation {
+  private toReservation(row: ReservationEntity): Reservation {
+    return {
+      id: row.id,
+      source: row.source,
+      sessionFormat: row.sessionFormat,
+      venue: row.venue,
+      firstChoiceDate: row.firstChoiceDate,
+      secondChoiceDate: row.secondChoiceDate,
+      dietary: row.dietary,
+      fullName: row.fullName,
+      email: row.email,
+      mobile: row.mobile,
+      assistantContact: row.assistantContact,
+      status: row.status,
+      createdAt:
+        row.createdAt instanceof Date
+          ? row.createdAt.toISOString()
+          : String(row.createdAt),
+    };
+  }
+
+  private normalize(
+    input: ReservationInput,
+    source: 'public' | 'admin',
+  ): Reservation {
     const fullName = String(input.fullName || '').trim();
     const email = String(input.email || '').trim();
     const mobile = String(input.mobile || '').trim();
@@ -84,23 +114,5 @@ export class ReservationsService {
       status: input.status || 'pending',
       createdAt: new Date().toISOString(),
     };
-  }
-
-  private ensureStore() {
-    const dir = join(process.cwd(), 'data');
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    if (!existsSync(this.filePath)) this.write([]);
-  }
-
-  private read(): Reservation[] {
-    try {
-      return JSON.parse(readFileSync(this.filePath, 'utf8')) as Reservation[];
-    } catch {
-      return [];
-    }
-  }
-
-  private write(items: Reservation[]) {
-    writeFileSync(this.filePath, JSON.stringify(items, null, 2));
   }
 }
