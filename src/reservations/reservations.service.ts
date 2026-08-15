@@ -52,7 +52,12 @@ export class ReservationsService {
   async availability() {
     const rows = await this.repo.find({
       where: { status: In(ACTIVE_STATUSES) },
-      select: ['id', 'sessionFormat', 'firstChoiceDate', 'secondChoiceDate'],
+      select: {
+        id: true,
+        sessionFormat: true,
+        firstChoiceDate: true,
+        secondChoiceDate: true,
+      },
     });
     const lunch = new Set<string>();
     const dinner = new Set<string>();
@@ -126,7 +131,10 @@ export class ReservationsService {
         status: In(ACTIVE_STATUSES),
         ...(ignoreId ? { id: Not(ignoreId) } : {}),
       },
-      select: ['firstChoiceDate', 'secondChoiceDate'],
+      select: {
+        firstChoiceDate: true,
+        secondChoiceDate: true,
+      },
     });
     const dates = new Set<string>();
     for (const row of rows) {
