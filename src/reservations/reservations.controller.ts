@@ -15,6 +15,11 @@ import { ReservationsService } from './reservations.service';
 export class ReservationsController {
   constructor(private readonly reservations: ReservationsService) {}
 
+  @Get('availability')
+  availability() {
+    return this.reservations.availability();
+  }
+
   @Post()
   create(@Body() body: ReservationInput) {
     return this.reservations.create(body, 'public');
