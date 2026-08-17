@@ -12,6 +12,7 @@ const ALLOWED_ORIGINS = [
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
   app.setGlobalPrefix('api');
   app.enableCors({
     origin: ALLOWED_ORIGINS,
