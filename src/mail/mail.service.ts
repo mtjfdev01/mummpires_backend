@@ -24,19 +24,23 @@ export class MailService {
       'MuMMpires Concierge <beth.t@example.com>';
     const adminTo = this.config.get<string>('ADMIN_EMAIL');
 
-    try {
-      const { error } = await this.resend.emails.send({
-        from,
-        to: reservation.email,
-        subject: 'Your MuMMpires reservation request has been received',
-        html: this.guestHtml(reservation),
-      });
-      if (error) this.logger.error(error.message || error);
-    } catch (error) {
-      this.logger.error('Failed to send guest confirmation', error as Error);
+    if (reservation.email) {
+      try {
+        const { error } = await this.resend.emails.send({
+          from,
+          to: reservation.email,
+          subject: 'Your MuMMpires reservation request has been received',
+          html: this.guestHtml(reservation),
+        });
+        if (error) this.logger.error(error.message || error);
+      } catch (error) {
+        this.logger.error('Failed to send guest confirmation', error as Error);
+      }
+    } else {
+      this.logger.log('No guest email provided; skipping confirmation email.');
     }
 
-    if (adminTo) {
+    if (adminTo && reservation.source !== 'admin') {
       try {
         const { error } = await this.resend.emails.send({
           from,
@@ -53,7 +57,7 @@ export class MailService {
 
   private guestHtml(r: Reservation) {
     return this.wrap(`
-      <p style="margin:0 0 16px;">Dear ${this.esc(r.fullName)},</p>
+      <p style="margin:0 0 16px;">Dear ${this.esc(r.fullName || 'Guest')},</p>
       <p style="margin:0 0 16px;">Thank you. Your reservation request at Rumi's Kitchen Avalon for <strong>${this.esc(this.sessionLabel(r.sessionFormat))}</strong> has been received. Our concierge will contact you within 2 hours.</p>
       ${this.detailsTable(r)}
       <p style="margin:24px 0 0;font-size:13px;color:#c5c5c5;">All times are subject to availability. This invitation is confidential and by invitation only.</p>
@@ -72,7 +76,8 @@ export class MailService {
       ['Session', this.sessionLabel(r.sessionFormat)],
       ['Venue', this.venueLabel(r.venue)],
       ['1st choice', r.firstChoiceDate],
-      ['2nd choice', r.secondChoiceDate],
+      ['2nd choice', r.secondChoiceDate || '—'],
+      ['Time slot', r.slotTime ? this.timeLabel(r.slotTime) : '—'],
       ['Dietary', r.dietary || '—'],
       ['Name', r.fullName],
       ['Email', r.email],
@@ -110,6 +115,14 @@ export class MailService {
     return value === 'dinner'
       ? 'Exclusive Dinner Session (7:00 PM - 9:00 PM)'
       : 'Private Executive Lunch (12:30 PM - 2:00 PM)';
+  }
+
+  private timeLabel(value: string) {
+    const [hours, minutes] = value.split(':').map(Number);
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return value;
+    const suffix = hours >= 12 ? 'PM' : 'AM';
+    const hour12 = hours % 12 || 12;
+    return `${hour12}:${String(minutes).padStart(2, '0')} ${suffix}`;
   }
 
   private venueLabel(value: string) {

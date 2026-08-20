@@ -23,19 +23,22 @@ export class ReservationEntity {
   @Column()
   firstChoiceDate: string;
 
-  @Column()
+  @Column({ default: '' })
   secondChoiceDate: string;
+
+  @Column({ default: '' })
+  slotTime: string;
 
   @Column({ default: '' })
   dietary: string;
 
-  @Column()
+  @Column({ default: '' })
   fullName: string;
 
-  @Column()
+  @Column({ default: '' })
   email: string;
 
-  @Column()
+  @Column({ default: '' })
   mobile: string;
 
   @Column({ default: '' })

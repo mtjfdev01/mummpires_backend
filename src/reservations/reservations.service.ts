@@ -15,6 +15,11 @@ import type {
   ReservationStatus,
   SessionFormat,
 } from './reservation.types';
+import {
+  ALL_SLOT_TIMES,
+  DINNER_SLOT_TIMES,
+  LUNCH_SLOT_TIMES,
+} from './reservation.types';
 
 const ACTIVE_STATUSES: ReservationStatus[] = ['pending', 'approved'];
 
@@ -32,6 +37,18 @@ function prettyDate(key: string) {
     day: 'numeric',
     year: 'numeric',
   });
+}
+
+function prettyTime(value: string) {
+  const [hours, minutes] = value.split(':').map(Number);
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return value;
+  const suffix = hours >= 12 ? 'PM' : 'AM';
+  const hour12 = hours % 12 || 12;
+  return `${hour12}:${String(minutes).padStart(2, '0')} ${suffix}`;
+}
+
+function sessionSlots(format: SessionFormat) {
+  return format === 'dinner' ? [...DINNER_SLOT_TIMES] : [...LUNCH_SLOT_TIMES];
 }
 
 @Injectable()
@@ -57,27 +74,38 @@ export class ReservationsService {
         sessionFormat: true,
         firstChoiceDate: true,
         secondChoiceDate: true,
+        slotTime: true,
       },
     });
     const lunch = new Set<string>();
     const dinner = new Set<string>();
+    const slots: Record<string, string[]> = {};
+
     for (const row of rows) {
-      const taken = row.sessionFormat === 'dinner' ? dinner : lunch;
-      if (row.firstChoiceDate) taken.add(row.firstChoiceDate);
-      if (row.secondChoiceDate) taken.add(row.secondChoiceDate);
+      const takenDates = row.sessionFormat === 'dinner' ? dinner : lunch;
+      const times = row.slotTime
+        ? [row.slotTime]
+        : sessionSlots(row.sessionFormat);
+      for (const date of [row.firstChoiceDate, row.secondChoiceDate]) {
+        if (!date) continue;
+        takenDates.add(date);
+        if (!slots[date]) slots[date] = [];
+        for (const time of times) {
+          if (!slots[date].includes(time)) slots[date].push(time);
+        }
+      }
     }
+
     return {
       lunch: [...lunch],
       dinner: [...dinner],
+      slots,
     };
   }
 
   async create(input: ReservationInput, source: 'public' | 'admin') {
     const reservation = this.normalize(input, source);
-    await this.assertSlotsAvailable(reservation.sessionFormat, [
-      reservation.firstChoiceDate,
-      reservation.secondChoiceDate,
-    ]);
+    await this.assertAvailable(reservation);
     const saved = await this.repo.save(
       this.repo.create({
         ...reservation,
@@ -97,30 +125,76 @@ export class ReservationsService {
     const row = await this.repo.findOne({ where: { id } });
     if (!row) throw new NotFoundException('Reservation not found');
     if (ACTIVE_STATUSES.includes(status)) {
-      await this.assertSlotsAvailable(
-        row.sessionFormat,
-        [row.firstChoiceDate, row.secondChoiceDate],
-        row.id,
-      );
+      await this.assertAvailable(this.toReservation(row), row.id);
     }
     row.status = status;
     return this.toReservation(await this.repo.save(row));
   }
 
-  private async assertSlotsAvailable(
-    sessionFormat: SessionFormat,
-    dates: string[],
-    ignoreId?: string,
-  ) {
-    const taken = await this.takenDates(sessionFormat, ignoreId);
+  private async assertAvailable(reservation: Reservation, ignoreId?: string) {
+    const dates = [reservation.firstChoiceDate, reservation.secondChoiceDate]
+      .map((date) => String(date || '').trim())
+      .filter(Boolean);
+
+    if (reservation.slotTime) {
+      await this.assertTimeSlotAvailable(
+        reservation.sessionFormat,
+        dates,
+        reservation.slotTime,
+        ignoreId,
+      );
+      return;
+    }
+
+    const taken = await this.takenDates(reservation.sessionFormat, ignoreId);
     const blocked = [...new Set(dates.filter((date) => taken.has(date)))];
     if (!blocked.length) return;
 
-    const current = sessionName(sessionFormat);
-    const other = sessionName(sessionFormat === 'lunch' ? 'dinner' : 'lunch');
+    const current = sessionName(reservation.sessionFormat);
+    const other = sessionName(
+      reservation.sessionFormat === 'lunch' ? 'dinner' : 'lunch',
+    );
     const when = blocked.map(prettyDate).join(' and ');
     throw new ConflictException(
       `This ${current} slot is not available on ${when}. Please choose another date or try the ${other}.`,
+    );
+  }
+
+  private async assertTimeSlotAvailable(
+    sessionFormat: SessionFormat,
+    dates: string[],
+    slotTime: string,
+    ignoreId?: string,
+  ) {
+    const rows = await this.repo.find({
+      where: {
+        sessionFormat,
+        status: In(ACTIVE_STATUSES),
+        ...(ignoreId ? { id: Not(ignoreId) } : {}),
+      },
+      select: {
+        firstChoiceDate: true,
+        secondChoiceDate: true,
+        slotTime: true,
+      },
+    });
+
+    const blocked = dates.filter((date) =>
+      rows.some((row) => {
+        const onDate =
+          row.firstChoiceDate === date || row.secondChoiceDate === date;
+        if (!onDate) return false;
+        if (!row.slotTime) return true;
+        return row.slotTime === slotTime;
+      }),
+    );
+
+    if (!blocked.length) return;
+
+    const current = sessionName(sessionFormat);
+    const when = blocked.map(prettyDate).join(' and ');
+    throw new ConflictException(
+      `The ${prettyTime(slotTime)} ${current} slot is not available on ${when}. Please choose another time.`,
     );
   }
 
@@ -152,6 +226,7 @@ export class ReservationsService {
       venue: row.venue,
       firstChoiceDate: row.firstChoiceDate,
       secondChoiceDate: row.secondChoiceDate,
+      slotTime: row.slotTime || '',
       dietary: row.dietary,
       fullName: row.fullName,
       email: row.email,
@@ -174,35 +249,55 @@ export class ReservationsService {
     const mobile = String(input.mobile || '').trim();
     const firstChoiceDate = String(input.firstChoiceDate || '').trim();
     const secondChoiceDate = String(input.secondChoiceDate || '').trim();
+    const slotTime = String(input.slotTime || '').trim();
+    const sessionFormat = (input.sessionFormat || 'lunch') as SessionFormat;
+    const venue = input.venue || 'private-dining';
 
-    if (!fullName || !email || !mobile || !firstChoiceDate || !secondChoiceDate) {
+    if (source === 'public') {
+      if (
+        !fullName ||
+        !email ||
+        !mobile ||
+        !firstChoiceDate ||
+        !secondChoiceDate
+      ) {
+        throw new BadRequestException(
+          'Full name, email, mobile, and both date choices are required.',
+        );
+      }
+    } else if (!firstChoiceDate || !slotTime) {
       throw new BadRequestException(
-        'Full name, email, mobile, and both date choices are required.',
+        'Please pick a date and an available time slot.',
       );
     }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       throw new BadRequestException('Please enter a valid email address.');
     }
-    if (!['lunch', 'dinner'].includes(input.sessionFormat)) {
+    if (!['lunch', 'dinner'].includes(sessionFormat)) {
       throw new BadRequestException('Please select a session format.');
     }
-    if (!['private-dining', 'briefing-suite'].includes(input.venue)) {
+    if (!['private-dining', 'briefing-suite'].includes(venue)) {
       throw new BadRequestException('Please select a venue.');
+    }
+    if (slotTime && !(ALL_SLOT_TIMES as readonly string[]).includes(slotTime)) {
+      throw new BadRequestException('Please select a valid time slot.');
     }
 
     return {
       id: randomUUID(),
       source,
-      sessionFormat: input.sessionFormat,
-      venue: input.venue,
+      sessionFormat,
+      venue,
       firstChoiceDate,
       secondChoiceDate,
+      slotTime,
       dietary: String(input.dietary || '').trim(),
-      fullName,
+      fullName: fullName || (source === 'admin' ? 'Admin booking' : fullName),
       email,
       mobile,
       assistantContact: String(input.assistantContact || '').trim(),
-      status: input.status || 'pending',
+      status: input.status || (source === 'admin' ? 'approved' : 'pending'),
       createdAt: new Date().toISOString(),
     };
   }
