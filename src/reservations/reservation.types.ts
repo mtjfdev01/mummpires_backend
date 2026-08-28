@@ -1,5 +1,5 @@
 export type SessionFormat = 'lunch' | 'dinner';
-export type VenueOption = 'private-dining' | 'briefing-suite';
+export type VenueOption = 'private-dining' | 'briefing-suite' | 'starbucks';
 export type ReservationStatus = 'pending' | 'approved' | 'declined';
 export type ReservationSource = 'public' | 'admin';
 

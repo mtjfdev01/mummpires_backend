@@ -58,7 +58,7 @@ export class MailService {
   private guestHtml(r: Reservation) {
     return this.wrap(`
       <p style="margin:0 0 16px;">Dear ${this.esc(r.fullName || 'Guest')},</p>
-      <p style="margin:0 0 16px;">Thank you. Your reservation request at Rumi's Kitchen Avalon for <strong>${this.esc(this.sessionLabel(r.sessionFormat))}</strong> has been received. Our concierge will contact you within 2 hours.</p>
+      <p style="margin:0 0 16px;">Thank you. Your reservation request at <strong>${this.esc(this.venueLabel(r.venue))}</strong> for <strong>${this.esc(this.sessionLabel(r.sessionFormat))}</strong> has been received. Our concierge will contact you within 2 hours.</p>
       ${this.detailsTable(r)}
       <p style="margin:24px 0 0;font-size:13px;color:#c5c5c5;">All times are subject to availability. This invitation is confidential and by invitation only.</p>
     `);
@@ -126,9 +126,9 @@ export class MailService {
   }
 
   private venueLabel(value: string) {
-    return value === 'briefing-suite'
-      ? 'Executive Briefing Suite / On-Site'
-      : "Private Dining Room at Rumi's Kitchen";
+    if (value === 'starbucks') return 'Starbucks, Alpharetta, Georgia';
+    if (value === 'briefing-suite') return 'Executive Briefing Suite / On-Site';
+    return "Rumi's Kitchen — Avalon";
   }
 
   private esc(value: string) {
