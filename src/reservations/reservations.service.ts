@@ -254,15 +254,9 @@ export class ReservationsService {
     const venue = input.venue || 'private-dining';
 
     if (source === 'public') {
-      if (
-        !fullName ||
-        !email ||
-        !mobile ||
-        !firstChoiceDate ||
-        !secondChoiceDate
-      ) {
+      if (!fullName || !email || !mobile || !firstChoiceDate || !slotTime) {
         throw new BadRequestException(
-          'Full name, email, mobile, and both date choices are required.',
+          'Full name, email, mobile, date, and time slot are required.',
         );
       }
     } else if (!firstChoiceDate || !slotTime) {
