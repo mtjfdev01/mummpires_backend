@@ -77,7 +77,7 @@ export class MailService {
       ['Venue', this.venueLabel(r.venue)],
       ['1st choice', r.firstChoiceDate],
       ['2nd choice', r.secondChoiceDate || '—'],
-      ['Time slot', r.slotTime ? this.timeLabel(r.slotTime) : '—'],
+      ['Time slot', this.timeSlotLabel(r)],
       ['Dietary', r.dietary || '—'],
       ['Name', r.fullName],
       ['Email', r.email],
@@ -115,6 +115,15 @@ export class MailService {
     return value === 'dinner'
       ? 'Exclusive Dinner Session (7:00 PM - 9:00 PM)'
       : 'Private Executive Lunch (12:30 PM - 2:00 PM)';
+  }
+
+  private timeSlotLabel(r: Reservation) {
+    if (r.venue === 'starbucks' && r.slotTime) {
+      return this.timeLabel(r.slotTime);
+    }
+    return r.sessionFormat === 'dinner'
+      ? '7:00 PM - 9:00 PM'
+      : '12:30 PM - 2:00 PM';
   }
 
   private timeLabel(value: string) {

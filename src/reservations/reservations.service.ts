@@ -321,7 +321,11 @@ export class ReservationsService {
       venue,
       firstChoiceDate,
       secondChoiceDate,
-      slotTime: slotVenue ? slotTime : '',
+      slotTime: slotVenue
+        ? slotTime
+        : sessionFormat === 'dinner'
+          ? '19:00'
+          : '12:30',
       dietary: String(input.dietary || '').trim(),
       fullName: fullName || (source === 'admin' ? 'Admin booking' : fullName),
       email,
